@@ -9,6 +9,10 @@ html,body {
     font-family: Helvetica, Arial, Verdana, Sans-Serif;
 }
 
+#smart_player {
+    z-index: -1;
+}
+
 .bg {
     position: absolute;
     left: 0;
@@ -31,7 +35,8 @@ html,body {
     background: rgba(0,0,0,0.7);
 }
 
-.player-play {
+.player-play,
+.player-pause {
     width: 50px;
     height: 54px;
     position: absolute;
@@ -40,14 +45,26 @@ html,body {
     bottom: 13px;
 }
 
-.player-play-icon {
-    display: block;
-    width: 100%;
-    height: 100%;
+.player-play {
     background: url(../img/sprite.png) -50px 0;
 }
 
-.focus .player-play-icon {
+.player-pause {
+    display: none;
+    border: 12px solid #fff;
+    border-top: none;
+    border-bottom: none;
+    width: 20px;
+    height: 50px;
+    margin-left: -21px;
+    bottom: 16px;
+}
+
+.player-pause.focus {
+    border-color: #3e82f3;
+}
+
+.player-play.focus  {
     background: url(../img/sprite.png) 0 0;
 }
 
