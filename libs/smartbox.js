@@ -176,17 +176,46 @@
           this.addExternalCss(this.externalCss);
         }
       }
-    }
+    },
+
+    /**
+     * Add events methods to source object
+     * @param object {Object} source object
+     */
+    extendFromEvents: function(object){
+          var eventProto,
+              extendFunction = _.merge;
+
+          if (window.EventEmitter) {
+              eventProto = EventEmitter.prototype;
+          } else if (window.Backbone) {
+              eventProto = Backbone.Events;
+          } else if (window.Events) {
+              eventProto = Events.prototype;
+          }
+
+          object.extend = function (proto) {
+              extendFunction(this, proto);
+          };
+
+          object.extend(eventProto);
+      }
   };
 
   Smartbox.config = {
-    DUID: 'real'
+    DUID: 'real',
+    customVolumeEnable: false
   };
+
+
+  SmartboxAPI.extendFromEvents(SmartboxAPI);
 
   _.extend(Smartbox, SmartboxAPI);
 
   // exporting library to global
   window.SB = Smartbox;
+
+
 
   // initialize library
   window.onload = function () {
@@ -295,6 +324,35 @@
 
   _.extend(SB, PlatformApi);
 })(this);
+(function () {
+  /**
+   * Plugin constructor
+   * @param name plugin name
+   * @param api plugin public functions
+   * @returns {Plugin}
+   * @constructor
+   */
+  var Plugin = function ( name, api ) {
+    this.name = name;
+
+    _.extend(this, api);
+    return this;
+  };
+
+  Plugin.prototype.config = {};
+  Plugin.prototype.initialize = $.noop;
+  Plugin.prototype.isManuallyInited = false;
+
+  SB.addPlugin = function ( pluginName, pluginApi ) {
+    var plugin;
+    pluginName = '$$' + pluginName;
+    plugin = this.plugins[pluginName] = new Plugin(pluginName, pluginApi);
+
+    if ( !window[pluginName] ) {
+      window[pluginName] = plugin;
+    }
+  }
+})();
 /**
  * Keyboard Plugin
  */
@@ -2114,7 +2172,6 @@ $(function () {
       n && nav.current(n);
     });
   });
-
 })(this);
 /**
  * Player plugin for smartbox
@@ -2122,7 +2179,7 @@ $(function () {
 
 (function (window) {
 
-    var updateInterval, curAudio = 0;
+    var updateInterval, curAudio = 0, curSubtitle=0;
 
 
     /**
@@ -2132,6 +2189,8 @@ $(function () {
      */
     var stub_play = function (self) {
         self.state = "play";
+
+        updateInterval && clearInterval(updateInterval);
         updateInterval = setInterval(function () {
             self.trigger("update");
             self.videoInfo.currentTime += 0.5;
@@ -2140,7 +2199,7 @@ $(function () {
                 self.trigger("complete");
             }
         }, 500);
-    }
+    };
 
     var inited = false;
 
@@ -2240,17 +2299,27 @@ $(function () {
          * Player.pause(); //paused
          */
         pause: function () {
-            this._stop();
+          if (this.state === 'play') {
+            this._pause();
             this.state = "pause";
+            this.trigger('pause');
+          }
         },
+        _pause: $.noop,
         /**
          * Resume playback
          * @examples
          * Player.pause(); //resumed
          */
         resume: function () {
+          if (this.state === 'pause') {
+            this._resume();
             stub_play(this);
+            this.state = "play";
+            this.trigger('resume');
+          }
         },
+        _resume: $.noop,
         /**
          * Toggles pause/resume
          * @examples
@@ -2368,24 +2437,89 @@ $(function () {
             }
         },
         subtitle: {
+            _urls: [],
+            running: false,
+            $subtitles_text: null,
+
+            hasUpdateListener: false,
+
+            _prevTime: -1,
+            _prevSubtitle: -1,
+
+            onUpdate: function () {
+                if (this.running) {
+                    var cTime = Player.videoInfo.currentTime, index, subtitleObject;
+                    //если идет последовательное воспроизведение
+                    //это самый частый случай
+                    if (cTime > this._prevTime) {
+                        console.log('normal');
+                        index = this.getTextIndex(this._prevSubtitle + 1);
+                    } else {//если были перемотки ищем с начала и до конца
+                        console.log('rewind');
+                        index = this.getTextIndex(0);
+                    }
+
+                    subtitleObject = this.data[index];
+
+                    if (subtitleObject) {
+                        this.showText(subtitleObject.text);
+                        this._prevTime = cTime;
+                        this._prevSubtitle = index;
+                    }
+                }
+
+            },
+
+            showText: function(text){
+                var $subtitiles;
+                if(!this.$subtitles_text){
+                    $('body').append('<div id="subtitles_view" style="position: absolute; z-index: 1;"><div id="subtitles_text"></div></div>');
+                    $subtitiles = $('#subtitles_view');
+                    $subtitiles.css({
+                        width: '1280px',
+                        height: '720px',
+                        left: '0px',
+                        top: '0px'
+                    });
+                    this.$subtitles_text=$('#subtitles_text').css({
+                        'position': 'absolute',
+                        'text-align': 'center',
+                        'width': '100%',
+                        'left': '0',
+                        'bottom': '50px',
+                        'font-size': '24px',
+                        'color': '#fff',
+                        'text-shadow': '0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000',
+                        'line-height': '26px'
+                    });
+                }
+                this.$subtitles_text.html(text);
+            },
+
+            add: function(url, name){
+                this._urls.push({
+                    url: url,
+                    name: name
+                });
+            },
             /**
              * Set subtitle index
              * @param index
              */
             set: function (index) {
                 curSubtitle = index;
+                if(index!=-1){
+                    this.url(this._urls[index].url);
+                }else{
+                    this.running=false;
+                }
             },
             /**
              * Returns list of available subtitles
              * @returns {Array}
              */
             get: function () {
-                var len = 2;
-                var result = [];
-                for (var i = 0; i < len; i++) {
-                    result.push(0);
-                }
-                return result;
+                return _.pluck(this._urls, 'name');
             },
             /**
              * @returns {Number} index of current subtitles
@@ -2404,17 +2538,19 @@ $(function () {
                     Player.subtitle.set(cur);
                 }
             },
-            text: function (time) {
-                var data = Player.subtitle.data,
-                    index = _.sortedIndex(data, {
-                        time: time
-                    }, function (value) {
-                        return value.time;
-                    });
-                if (data[index - 1]) {
-                    return data[index - 1].text;
+            getTextIndex: function (fromIndex) {
+                var cTime = Player.videoInfo.currentTime*1000;
+                for (var i = fromIndex, l = this.data.length; i < l; i++) {
+                    var obj = this.data[i];
+                    if (cTime >= obj.time) {
+                        var next=this.data[i+1];
+                        if(next&&cTime>=next.time){
+                            continue;
+                        }
+                        return i;
+                    }
                 }
-                return '';
+                return -1;
             },
             data: [
                 {
@@ -2428,52 +2564,21 @@ $(function () {
              */
             url: function (url) {
                 var extension = /\.([^\.]+)$/.exec(url)[1];
-                // TODO Сделать универсальное выключение вшитых субтитров
-                Player.subtitle.set(undefined);
+                var self=this;
                 $.ajax({
                     url: url,
                     dataType: 'text',
                     success: function (data) {
-                        var $subtitiles = $('#subtitles_view');
-                        $(Player).off('.subtitles');
-                        Player.subtitle.init = true;
-                        Player.subtitle.remote = true;
+                        self.running=true;
                         Player.subtitle.parse[extension].call(Player, data);
-                        $subtitiles.show();
-                        var setSubtitlesText = function () {
-                            $('#subtitles_text').html(Player.subtitle.text(parseInt(Player.videoInfo.currentTime) * 1000));
-                        }
-                        Player.on('update', setSubtitlesText);
 
-                        if (!$subtitiles.length) {
-                            $('body').append('<div id="subtitles_view" style="position: absolute; z-index: 1;"><div id="subtitles_text"></div></div>');
-                            $subtitiles = $('#subtitles_view');
-                            $subtitiles.css({
-                                width: '1280px',
-                                height: '720px',
-                                left: '0px',
-                                top: '0px'
-                            });
-                            $('#subtitles_text').css({
-                                'position': 'absolute',
-                                'text-align': 'center',
-                                'width': '100%',
-                                'left': '0',
-                                'bottom': '50px',
-                                'font-size': '24px',
-                                'color': '#fff',
-                                'text-shadow': '0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 3px #000',
-                                'line-height': '26px'
+                        if(!self.hasUpdateListener){
+                            self.hasUpdateListener=true;
+                            Player.on('update', function(){
+                                self.onUpdate();
                             });
                         }
 
-                        var stopSubtitlesUpdate = function () {
-                            $(Player).off('update', setSubtitlesText);
-                            $(Player).off('stop', stopSubtitlesUpdate);
-                            $subtitiles.hide();
-                        }
-
-                        Player.on('stop', stopSubtitlesUpdate);
                     }
                 });
             },
@@ -2534,30 +2639,7 @@ $(function () {
         }
     };
 
-
-    var extendFunction, eventProto;
-    //use underscore, or jQuery extend function
-    if (window._ && _.extend) {
-        extendFunction = _.extend;
-    } else if (window.$ && $.extend) {
-        extendFunction = $.extend;
-    }
-
-
-    if (window.EventEmitter) {
-        eventProto = EventEmitter.prototype;
-    } else if (window.Backbone) {
-        eventProto = Backbone.Events;
-    } else if (window.Events) {
-        eventProto = Events.prototype;
-    }
-
-    Player.extend = function (proto) {
-        extendFunction(this, proto);
-    };
-
-    Player.extend(eventProto);
-
+    SB.extendFromEvents(Player);
 
 }(this));
 (function ($) {
@@ -2990,20 +3072,26 @@ SB.readyForPlatform('browser', function () {
              */
         },
         _play: function (options) {
-            this.$video_container.attr('src', options.url);
-            this.$video_container[0].play();
+            var video=this.$video_container[0];
+            video.src=options.url;
+
+            if(options.from){
+                //may be buggy
+                video.addEventListener('loadedmetadata', function(){
+                    video.currentTime = options.from;
+                }, false);
+            }
+            video.play();
         },
         _stop: function () {
             this.$video_container[0].pause();
             this.$video_container[0].src = '';
         },
-        pause: function () {
+        _pause: function () {
             this.$video_container[0].pause();
-            this.state = "pause";
         },
-        resume: function () {
+        _resume: function () {
             this.$video_container[0].play();
-            this.state = "play";
         },
         seek: function (time) {
             this.$video_container[0].currentTime = time;
@@ -3020,7 +3108,7 @@ SB.readyForPlatform('browser', function () {
                 return 0;
             }
         },
-        subtitle: {
+        /*subtitle: {
             set: function (index) {
                 if (Player.$video_container[0].textTracks) {
                     var subtitles = _.filter(Player.$video_container[0].textTracks, function (i) {
@@ -3081,7 +3169,7 @@ SB.readyForPlatform('browser', function () {
                     Player.subtitle.set(cur);
                 }
             }
-        }
+        }*/
     });
 });
 
@@ -3142,7 +3230,6 @@ SB.createPlatform('browser', {
         return this.DUID;
     }
 });
-
 (function ($) {
     "use strict";
 
@@ -3198,7 +3285,7 @@ SB.createPlatform('browser', {
 SB.readyForPlatform('lg', function () {
     var updateInterval;
 
-    var isReady = false;
+    var isReady = false, from;
 
     Player.extend({
         updateDelay: 500,
@@ -3223,20 +3310,31 @@ SB.readyForPlatform('lg', function () {
         _update: function () {
             var info = this.plugin.mediaPlayInfo();
 
-            if (info && !isReady) {
+            if (info && info.duration && !isReady) {
                 //$('#log').append('<div>'+info.duration+'</div>');
+
+                $$log(JSON.stringify(info));
+
                 isReady = true;
 
-                this.trigger('ready');
+
                 this.videoInfo = {
                     duration: info.duration / 1000
                 };
+
+                if(from){
+                    this.seek(from);
+                }
+
+                this.trigger('ready');
+
             }
 
+            if(!isReady){
+                return;
+            }
 
             this.videoInfo.currentTime=info.currentPosition/1000;
-
-
             this.trigger('update');
         },
         onBuffering: function (isStarted) {
@@ -3251,21 +3349,32 @@ SB.readyForPlatform('lg', function () {
             isReady = false;
             this.plugin.data = options.url;
             this.plugin.play(1);
+
+            from= options.from;
         },
-        pause: function(){
+        _pause: function(){
             this.plugin.play(0);
-            this.state="pause";
         },
-        resume: function(){
+        _resume: function(){
             this.plugin.play(1);
-            this.state="play";
         },
         _stop: function () {
             this.plugin.stop();
-            this.state="stop";
         },
         seek: function(time){
             this.plugin.seek(time*1000);
+        },
+        audio: {
+            set: function (index) {
+            },
+            get: function () {
+               return [];
+            },
+            cur: function () {
+                return 0;
+            },
+            toggle: function () {
+            }
         }
     });
 });
@@ -3419,19 +3528,20 @@ SB.readyForPlatform('mag', function () {
             stb.Play(options.url);
             startUpdate();
             Player.trigger('bufferingBegin');
+            if(options.from){
+                this.seek(options.from);
+            }
         },
         _stop: function () {
             stb.Stop();
             stopUpdate();
         },
-        pause: function () {
+        _pause: function () {
             stb.Pause();
-            this.state = "pause";
             stopUpdate();
         },
-        resume: function () {
+        _resume: function () {
             stb.Continue();
-            this.state = "play";
             startUpdate();
         },
         seek: function (time) {
@@ -3534,9 +3644,7 @@ SB.readyForPlatform('mag', function () {
           eventName += isStandBy ? 'set' : 'unset';
           stb.StandBy(isStandBy);
 
-          // TODO: trigger events on SB
-          $$log('trigger standby event ' + eventName, 'standby');
-          $body.trigger(eventName);
+          SB.trigger(eventName);
         });
       });
 
@@ -3672,14 +3780,12 @@ SB.readyForPlatform('philips', function () {
             video.stop();
             stopUpdate();
         },
-        pause: function () {
+        _pause: function () {
             video.play(0);
-            this.state = "pause";
             stopUpdate();
         },
-        resume: function () {
+        _resume: function () {
             video.play(1);
-            this.state = "play";
             startUpdate();
         },
         seek: function (time) {
@@ -3975,13 +4081,11 @@ SB.readyForPlatform('samsung', function () {
         _stop: function () {
             this.doPlugin('Stop');
         },
-        pause: function () {
+        _pause: function () {
             this.doPlugin('Pause');
-            this.state = "pause";
         },
-        resume: function () {
+        _resume: function () {
             this.doPlugin('Resume');
-            this.state = "play";
         },
         doPlugin: function () {
             var result,
@@ -4167,9 +4271,11 @@ SB.readyForPlatform('samsung', function () {
               }
             }
 
-            unregisterKey('VOL_UP');
-            unregisterKey('VOL_DOWN');
-            unregisterKey('MUTE');
+            if (!this.config.customVolumeEnable) {
+              unregisterKey('VOL_UP');
+              unregisterKey('VOL_DOWN');
+              unregisterKey('MUTE');
+            }
 
             this.widgetAPI.sendReadyEvent();
         },
@@ -4187,7 +4293,7 @@ SB.readyForPlatform('samsung', function () {
 
             switch ( keyCode ) {
               case sf.key.RETURN:
-              //case sf.key.EXIT:
+              case sf.key.EXIT:
               case 147:
               case 261:
                 sf.key.preventDefault();
@@ -4215,16 +4321,91 @@ SB.readyForPlatform('samsung', function () {
         },
 
         exit: function () {
-            sf.core.exit(false);
+            sf.core.exit(true);
         },
 
         sendReturn: function () {
-            sf.core.exit(true);
+            sf.core.exit(false);
         },
 
         blockNavigation: function () {
             sf.key.preventDefault();
+        },
+      volumeAddStep: 5,
+      volumeAdd: function (num) {
+        var $audio = this.$plugins.audio,
+          outputDevice = $audio.GetOutputDevice(),
+          volume, i;
+
+        if (outputDevice == 3 || this.productType == 2) {
+          return;
         }
+
+        var key = num < 0 ? 1 : 0;//если меньше 0 убавляем громкость
+        num = Math.abs(num);
+        for (i = 0; i < num; i++) {
+          $audio.SetVolumeWithKey(key);
+        }
+        volume = this.getVolume();
+        $(document.body).trigger('volume_change', {
+          volume: volume
+        });
+      },
+      toggleMute: function () {
+        var $audio = this.$plugins.audio,
+          volume, $body = $(document.body);
+        if (this.isMute) {
+          $audio.SetUserMute(0);
+          volume = this.getVolume();
+
+          if (volume === 0) {
+            this.volumeUp(5);
+          } else {
+            $body.trigger('volume_change', {
+              volume: volume
+            });
+          }
+          this.isMute = false;
+        } else {
+          if (!this.isMute) {
+            $audio.SetUserMute(1);
+
+            this.getVolume({
+              mute: true
+            });
+
+            $body.trigger('volume_change', {
+              volume: 0
+            });
+            this.isMute = true;
+          }
+        }
+      },
+      volumeDown: function (step) {
+        step = step || -this.volumeAddStep;
+        this.volumeAdd(-step);
+      },
+      volumeUp: function (step) {
+        step = step || this.volumeAddStep;
+        this.volumeAdd(step);
+      },
+      getVolume: function (options) {
+        options = options || {};
+        var $audio = this.$plugins.audio,
+          volume = $audio.GetVolume(),
+          $body = $(document.body);
+
+        if (volume == 0 || options.mute) {
+          if (!this.isMute) {
+            $body.addClass('mute').trigger('volume_mute');
+            this.isMute = true;
+          }
+        } else if (this.isMute) {
+          $body.removeClass('mute').trigger('volume_unmute');
+          this.isMute = false;
+        }
+        return volume;
+      }
     });
 
 })(this);

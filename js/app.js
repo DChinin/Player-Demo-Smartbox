@@ -1,55 +1,145 @@
-SB(function () {
+(function () {
 
-  var videoUrl = 'https://archive.org/download/ElephantsDream/ed_1024_512kb.mp4',
-    isPaused = false;
+  var LocalPlayer = {
+    initialize: function () {
+      this.$el = $('.player');
+      this.$progress = this.$el.find('.player-seek-progress');
+      this.$progressStyle = this.$progress[0].style;
+      this.$play = this.$el.find('.player-play');
+      this.$pause = this.$el.find('.player-pause');
 
-  var $player = $('.player'),
-    $play = $player.find('.player-play'),
-    $pause = $player.find('.player-pause'),
-    $rw = $player.find('.player-rw'),
-    $ff = $player.find('.player-ff');
+      // store link to smartbox plugin
+      this.plugin = window.Player;
+      this.addNativePlayerEvents();
+      this.addEvents();
+    },
 
-  function playHandler( e ) {
-    if (isPaused) {
-      Player.resume();
-      $play.hide();
-      $pause.show();
-      $$nav.current($pause);
-      isPaused = false;
-    } else {
-      Player.play({
-        url: videoUrl
+    init: function (media) {
+      this.plugin.play(media);
+    },
+
+    addNativePlayerEvents: function () {
+      var plugin = this.plugin,
+        self = this;
+
+      plugin.on('pause', function () {
+        self.$play.show();
+        self.$pause.hide();
       });
+      plugin.on('resume', function () {
+        self.$play.hide();
+        self.$pause.show();
+      });
+      plugin.on('update', _.bind(this.onUpdate, this));
+      plugin.on('stop', _.bind(this.onStop, this));
+      plugin.on('complete', _.bind(this.onStop, this));
+      plugin.on('ready', _.bind(this.onReady, this));
+    },
+
+    onReady: function () {
+      this.$play.hide();
+      this.$pause.show();
+    },
+
+    onStop: function (  ) {
+      this.$progressStyle.width = '0%';
+      this.$play.show();
+      this.$pause.hide();
+    },
+
+    onUpdate: function (  ) {
+      var info = this.plugin.videoInfo,
+        progressWidth;
+
+      progressWidth = (info.currentTime / info.duration) * 100;
+      if (progressWidth > 100) {
+        progressWidth = 100;
+      }
+      this.$progressStyle.width = progressWidth + '%';
+    },
+
+    addEvents: function () {
+      var playFunc = _.bind(this.onPlayClick, this),
+        pauseFunc = _.bind(this.onPauseClick, this),
+        stopFunc = _.bind(this.onStopClick, this),
+        RWFunc = _.bind(this.onRWClick, this),
+        FFClick = _.bind(this.onFFClick, this);
+
+      this.$pause.on('click', pauseFunc);
+      this.$play.on('click', playFunc);
+      this.$el.find('.player-rw').on('click', RWFunc);
+      this.$el.find('.player-ff').on('click', FFClick);
+
+      $(document.body).on({
+        'nav_key:play': playFunc,
+        'nav_key:stop': stopFunc,
+        'nav_key:pause': pauseFunc,
+        'nav_key:rw': RWFunc,
+        'nav_key:ff': FFClick
+      });
+    },
+
+    onStopClick: function () {
+      this.plugin.stop();
+    },
+
+    onPlayClick: function () {
+      this.plugin.play();
+    },
+
+    onPauseClick: function () {
+      this.plugin.pause();
+    },
+
+    onRWClick: function () {
+
+    },
+
+    onFFClick: function () {
+
     }
-  }
+  };
 
-  function pauseHandler( e ) {
-    if ( !isPaused ) {
-      Player.pause();
-      $play.show();
-      $pause.hide();
-      $$nav.current($play);
-      isPaused = true;
+  window.App = {
+
+    // main initialization point
+    initialize: function () {
+      this.$menu = $('.menu-list');
+
+      this.renderVideoItems();
+      this.addEvents();
+      LocalPlayer.initialize();
+
+      // start navigation
+      $$nav.on();
+    },
+
+    addEvents: function () {
+      this.$menu.on('click', '.menu-item', _.bind(this.onVideoClick, this));
+    },
+
+    // handler for click on item in videos menu
+    onVideoClick: function ( e ) {
+      var el = e.currentTarget;
+
+      LocalPlayer.init({
+        url: el.getAttribute('data-url'),
+        type: el.getAttribute('data-type')
+      })
+    },
+
+    // show items from videos.js in menu
+    renderVideoItems: function () {
+      var videos = this.videos || [],
+        result = '';
+      _.each(videos, function ( item ) {
+        result += '<li class="menu-item nav-item" data-url="'+ item.url +'" ' +
+                  'data-type="'+ item.type +'">' + item.title + '</li>';
+      });
+
+      this.$menu.html(result);
     }
-  }
+  };
 
-  function rwHandler( e ) {
-
-  }
-
-  function ffHandler( e ) {
-
-  }
-
-  Player.on('ready', function(){
-    $play.hide();
-    $pause.show();
-    $$nav.current($pause);
-  });
-
-  $play.on('click', playHandler);
-  $pause.on('click', pauseHandler);
-  $rw.on('click', rwHandler);
-  $ff.on('click', ffHandler);
-  $$nav.on('.player');
-});
+  SB(_.bind(App.initialize, App));
+})();
