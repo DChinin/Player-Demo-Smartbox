@@ -3,6 +3,7 @@
   var LocalPlayer = {
     initialize: function () {
       this.$el = $('.player');
+      this.$overlay = $('.player-overlay');
       this.$progress = this.$el.find('.player-seek-progress');
       this.$progressStyle = this.$progress[0].style;
       this.$play = this.$el.find('.player-play');
@@ -39,12 +40,14 @@
     onReady: function () {
       this.$play.hide();
       this.$pause.show();
+      this.$overlay.hide();
     },
 
     onStop: function (  ) {
       this.$progressStyle.width = '0%';
       this.$play.show();
       this.$pause.hide();
+      this.$overlay.show();
     },
 
     onUpdate: function (  ) {

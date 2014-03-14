@@ -10,13 +10,19 @@ html,body {
 }
 
 #smart_player,
-.player-bg {
+.player-bg,
+.player-overlay {
     position: absolute;
     background: #000;
     left: 350px!important;
     top: 50px!important;
     width: 930px!important;
     height: 523px!important;
+}
+
+.player-overlay {
+    background: url(../img/player-overlay.png) center center no-repeat;
+    z-index: 2;
 }
 
 .bg {
@@ -136,22 +142,26 @@ html,body {
     background: #e74c3c;
 }
 
+.player-play,
+.player-pause,
+.player-rw,
+.player-ff {
+    position: absolute;
+    left:50%;
+    top: 25px;
+    cursor: pointer;
+}
+
 .player-play {
     width: 31px;
     height: 34px;
-    position: absolute;
     padding: 11px 0 0 14px;
-    left:50%;
-    top: 25px;
     margin-left: -23px;
 }
 
 .player-pause {
     width: 35px;
     height: 35px;
-    top: 25px;
-    position: absolute;
-    left: 50%;
     margin-left: -23px;
     padding: 10px 0 0 10px;
 }
@@ -195,11 +205,8 @@ html,body {
 
 .player-rw,
 .player-ff {
-    top: 25px;
     height: 32px;
-    left: 50%;
     padding-top: 13px;
-    position: absolute;
 }
 
 .player-rw {
