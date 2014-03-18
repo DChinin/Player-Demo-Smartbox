@@ -2203,7 +2203,24 @@ $(function () {
 
     var inited = false;
 
+
+    var errorTimeout;
+
     var Player = window.Player = {
+
+
+        config: {
+            //Время после которого произойдет событие 'error'
+            errorTimeout: 9000,
+            size: {
+              left: 0,
+              top: 0,
+              width: 1280,
+              height: 720
+            }
+        },
+
+        jumpLength: 5,
 
         /**
          * Inserts player object to DOM and do some init work
@@ -2239,8 +2256,9 @@ $(function () {
          * }); // => runs stream
          */
         play: function (options) {
+            var self=this;
             if (!inited) {
-                this._init();
+                self._init();
                 inited = true;
             }
 
@@ -2250,9 +2268,25 @@ $(function () {
                 }
             }
             if (options !== undefined) {
-                this.stop();
-                this.state = 'play';
-                this._play(options);
+                self.stop();
+                self.state = 'play';
+                self._play(options);
+
+
+                var onready=function(){
+                    self.off('ready', onready);
+                    self.off('error', onready);
+                    clearTimeout(errorTimeout);
+                };
+
+                self.on('ready', onready);
+                self.on('error', onready);
+
+                errorTimeout=setTimeout(function(){
+                    self.trigger('error');
+                }, self.config.errorTimeout);
+
+
             } else if (options === undefined && this.state === 'pause') {
                 this.resume();
             }
@@ -2357,6 +2391,20 @@ $(function () {
             }
             return (hours ? hours + ':' : '') + minutes + ":" + seconds;
         },
+
+        setSize: function ( opt ) {
+          opt = opt || {};
+          var size = this.config.size;
+
+          _.extend(size, opt);
+
+          if (inited) {
+            this._setSize(size);
+          }
+        },
+
+        _setSize: $.noop,
+
         /**
          * Hash contains info about current video
          */
@@ -2395,6 +2443,30 @@ $(function () {
                 self.resume();
             }, 500);
         },
+
+        forward: function ( time ) {
+          time = time || this.jumpLength;
+          this._forward(time);
+          this.videoInfo.currentTime += time;
+          if (this.videoInfo.currentTime > this.duration) {
+            this.videoInfo.currentTime = this.duration;
+          }
+          this.trigger('update');
+        },
+
+        _forward: $.noop,
+
+        backward: function (time) {
+          time = time || this.jumpLength;
+          this._backward(time);
+          this.videoInfo.currentTime -= time;
+          if (this.videoInfo.currentTime < 0) {
+            this.videoInfo.currentTime = 0;
+          }
+          this.trigger('update');
+        },
+
+        _backward: $.noop,
         /**
          * For multi audio tracks videos
          */
@@ -3012,11 +3084,12 @@ SB.readyForPlatform('browser', function () {
     Player.extend({
         _init: function () {
             var self = this;
-            var ww = 1280;
-            var wh = 720;
 
+            this.$video_container = $('<video></video>', {
+              "id": "smart_player"
+            });
+            this._setSize(this.config.size);
 
-            this.$video_container = $('<video id="smart_player" style="position: absolute; left: 0; top: 0;width: ' + ww + 'px; height: ' + wh + 'px;"></video>');
             var video = this.$video_container[0];
             $('body').append(this.$video_container);
 
@@ -3038,6 +3111,8 @@ SB.readyForPlatform('browser', function () {
                 }).on('ended', function () {
                     self.state = "stop";
                     self.trigger('complete');
+                }).on('error', function(e){
+                    self.trigger('error');
                 });
 
 
@@ -3095,6 +3170,22 @@ SB.readyForPlatform('browser', function () {
         },
         seek: function (time) {
             this.$video_container[0].currentTime = time;
+        },
+        _forward: function (time) {
+            this.$video_container[0].currentTime = this.videoInfo.currentTime + time;
+        },
+        _backward: function (time) {
+          this.$video_container[0].currentTime = this.videoInfo.currentTime - time;
+        },
+        _setSize: function (size) {
+          this.$video_container.css({
+              position: "absolute",
+              left: size.left + 'px',
+              top: size.top + 'px',
+              width: size.width + 'px',
+              height: size.height + 'px',
+              zIndex: size.zIndex
+          });
         },
         audio: {
             //https://bugzilla.mozilla.org/show_bug.cgi?id=744896
@@ -3290,21 +3381,14 @@ SB.readyForPlatform('lg', function () {
     Player.extend({
         updateDelay: 500,
         _init: function () {
-            var self = this;
-            $('body').append('<object type="video/mp4" data="" width="1280" height="720" id="pluginPlayer" style="z-index: 0; position: absolute; left: 0; top: 0;"></object>');
-            this.plugin = $('#pluginPlayer')[0];
-            this.$plugin = $(this.plugin);
-            this.plugin.onPlayStateChange = function () {
-                self.onEvent.apply(self, arguments);
-            }
-            this.plugin.onBuffering = function () {
-                self.onBuffering.apply(self, arguments);
-            }
+
         },
         onEvent: function(){
-            if(this.plugin.playState=='5'){
+            if(this.plugin.playState==5){
                 this.state='stop';
                 this.trigger('complete');
+            }else if(this.plugin.playState==4){
+                this.trigger('error')
             }
         },
         _update: function () {
@@ -3313,7 +3397,7 @@ SB.readyForPlatform('lg', function () {
             if (info && info.duration && !isReady) {
                 //$('#log').append('<div>'+info.duration+'</div>');
 
-                $$log(JSON.stringify(info));
+                //$$log(JSON.stringify(info));
 
                 isReady = true;
 
@@ -3321,9 +3405,14 @@ SB.readyForPlatform('lg', function () {
                 this.videoInfo = {
                     duration: info.duration / 1000
                 };
-
+                var self=this;
                 if(from){
-                    this.seek(from);
+                    var self=this;
+                    var onBufEnd=function(){
+                        self.off('bufferingEnd', onBufEnd);
+                        self.seek(from);
+                    };
+                    self.on('bufferingEnd', onBufEnd);
                 }
 
                 this.trigger('ready');
@@ -3347,6 +3436,26 @@ SB.readyForPlatform('lg', function () {
                 Player._update();
             }, this.updateDelay);
             isReady = false;
+
+            $('#pluginPlayer').remove();
+
+            $('body').append('<object mode3D="'+(options.is3d?'side_by_side':'off')+'" type="video/mp4" data="" width="1280" height="720" id="pluginPlayer" style="z-index: 0; position: absolute; left: 0; top: 0;"></object>');
+            this.plugin = $('#pluginPlayer')[0];
+            this.$plugin = $(this.plugin);
+
+            var self=this;
+            this.plugin.onPlayStateChange = function () {
+                self.onEvent.apply(self, arguments);
+            }
+            this.plugin.onBuffering = function () {
+                self.onBuffering.apply(self, arguments);
+            }
+
+            this.plugin.onError  = function () {
+                self.trigger('error')
+            }
+
+
             this.plugin.data = options.url;
             this.plugin.play(1);
 
@@ -3929,24 +4038,30 @@ SB.readyForPlatform('samsung', function () {
                 case 7:
                     return self[method](args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
                 case 8:
-                    return self[method](args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
+                  return self[method](args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
 
             }
         } catch (e) {
             throw e;
         }
-    }
+    };
+
     Player.extend({
         usePlayerObject: true,
+        fullscreenSize: {
+          width: 1280,
+          height: 720
+        },
         _init: function () {
             var self = this;
             //document.body.onload=function(){
             if (self.usePlayerObject) {
                 //self.$plugin = $('<object id="pluginPlayer" border=0 classid="clsid:SAMSUNG-INFOLINK-PLAYER" style="position: absolute; left: 0; top: 0; width: 1280px; height: 720px;"></object>');
                 self.plugin = document.getElementById('pluginPlayer');
-                $('body').append(self.$plugin);
-
-
+                //var wrap = document.createElement('div');
+                //wrap.className = 'player-wrap';
+                //wrap.appendChild(self.plugin);
+                document.body.appendChild(self.plugin);
             } else {
                 self.plugin = sf.core.sefplugin('Player');
             }
@@ -3963,8 +4078,8 @@ SB.readyForPlatform('samsung', function () {
             self.plugin.OnBufferingStart = 'Player.OnBufferingStart';
             //self.plugin.OnBufferingProgress = 'Player.OnBufferingProgress';
             self.plugin.OnBufferingComplete = 'Player.OnBufferingComplete';
-            //self.plugin.OnConnectionFailed = 'Player.onError';
-            //self.plugin.OnNetworkDisconnected = 'Player.onError';
+            self.plugin.OnConnectionFailed = 'Player.onError';
+            self.plugin.OnNetworkDisconnected = 'Player.onError';
             //self.plugin.OnAuthenticationFailed = 'Player.OnAuthenticationFailed';
 
             self.plugin.OnEvent = 'Player.onEvent';
@@ -3975,21 +4090,36 @@ SB.readyForPlatform('samsung', function () {
             if (time <= 0) {
                 time = 0;
             }
-            /*if ( this.duration <= time + 1 ) {
-             this.videoInfo.currentTime = this.videoInfo.duration;
-             }
-             else {*/
-            var jump = Math.floor(time - this.videoInfo.currentTime - 1);
-            this.videoInfo.currentTime = time;
-            alert('jump: ' + jump);
-            if (jump < 0) {
-                this.doPlugin('JumpBackward', -jump);
+            if (this.videoInfo.duration <= (time + 1)) {
+              time = this.duration;
+              this.videoInfo.currentTime = this.duration;
+              var state = this.state;
+              this.state = 'STOP';
+              if (state != 'STOP') {
+                this.trigger('complete');
+              }
             }
             else {
+              var jump = Math.floor(time - this.currentTime) + 1;
+              if (jump < 0) {
+                this.doPlugin('JumpBackward', -jump);
+              }
+              else {
                 this.doPlugin('JumpForward', jump);
+              }
+              this.videoInfo.currentTime = time;
             }
-            //  this.currentTime = time;
-            //}
+        },
+
+        _forward: function (time) {
+            this.doPlugin('JumpForward', time);
+        },
+        _backward: function (time) {
+            this.doPlugin('JumpBackward', time);
+        },
+
+        onError: function(){
+            this.trigger('error');
         },
         onEvent: function (event, arg1, arg2) {
 
@@ -4000,7 +4130,7 @@ SB.readyForPlatform('samsung', function () {
                     break;
 
                 case 4:
-                    //this.onError();
+                    this.onError();
                     break;
 
                 case 8:
@@ -4094,10 +4224,7 @@ SB.readyForPlatform('samsung', function () {
                 args = Array.prototype.slice.call(arguments, 1, arguments.length) || [];
 
             if (this.usePlayerObject) {
-
-
                 result = safeApply(plugin, methodName, args);
-
             }
             else {
                 if (methodName.indexOf('Buffer') != -1) {
@@ -4108,6 +4235,75 @@ SB.readyForPlatform('samsung', function () {
             }
 
             return result;
+        },
+        _setSize: function (size) {
+
+          this.isFullscreen = false;
+
+          var width = size.width,
+            height = size.height,
+            x = size.left,
+            y = size.top,
+            videoWidth = this.videoInfo.width,
+            videoHeight = this.videoInfo.height;
+
+          // check if no video sizes
+          if (!videoWidth || !videoHeight) {
+
+            // event for overlay
+            this.trigger('setSize', {
+              width: width,
+              height: height,
+              offsetX: x,
+              offsetY: y
+            });
+            return;
+          }
+
+          var fullscreenSize = this.fullscreenSize,
+            windowRate = width / height,
+            clipRate = videoWidth / videoHeight,
+            w, h;
+
+          if (width === fullscreenSize.width &&
+              height === fullscreenSize.height) {
+            this.isFullscreen = true;
+          }
+
+          if (windowRate > clipRate) {
+              w = height * clipRate;
+              h = height;
+              x += (width - w) / 2;
+          }
+          else {
+              w = width;
+              h = width / clipRate;
+              y += (height - h) / 2;
+          }
+
+/*          if (!this.isFullscreen) {
+            this.doPlugin('SetCropArea', 0, 0, videoWidth, videoHeight);
+            $$log('Reset crop area', 'player');
+          }*/
+
+          //В плеере DPI отличное от приложения
+          this.doPlugin('SetDisplayArea', x * 0.75, y * 0.75, w * 0.75, h * 0.75);
+
+          // хак для паузы после изменения размера
+          // самсунговский плеер автоматически воспроизводит видео после изменения размеров
+          if (this.state === 'PAUSE') {
+            this.pause(true);
+          }
+
+          this.trigger('setSize', {
+            width: width,
+            height: height,
+            offsetX: size.left,
+            offsetY: size.top
+          });
+
+          $$log('Set player size', 'player');
+          $$log('Player size: ' + Math.floor(w) + " * " + Math.floor(h) + " ### Position: top:" + y + " / left: " + x, 'player');
         },
         audio: {
             set: function (index) {
@@ -4168,8 +4364,8 @@ SB.readyForPlatform('samsung', function () {
             pluginObjectTV: 'SAMSUNG-INFOLINK-TV',
             pluginObjectTVMW: 'SAMSUNG-INFOLINK-TVMW',
             pluginObjectNetwork: 'SAMSUNG-INFOLINK-NETWORK',
-            pluginObjectNNavi: 'SAMSUNG-INFOLINK-NNAVI',
-            pluginPlayer: 'SAMSUNG-INFOLINK-PLAYER'
+            pluginObjectNNavi: 'SAMSUNG-INFOLINK-NNAVI'
+            //pluginPlayer: 'SAMSUNG-INFOLINK-PLAYER'
         },
         samsungFiles = [
             '$MANAGER_WIDGET/Common/af/../webapi/1.0/deviceapis.js',
@@ -4179,8 +4375,7 @@ SB.readyForPlatform('samsung', function () {
             '$MANAGER_WIDGET/Common/af/2.0.0/sf.min.js',
             '$MANAGER_WIDGET/Common/API/Plugin.js',
             '$MANAGER_WIDGET/Common/API/Widget.js',
-            '$MANAGER_WIDGET/Common/API/TVKeyValue.js',
-            'src/platforms/samsung/localstorage.js'
+            '$MANAGER_WIDGET/Common/API/TVKeyValue.js'
         ];
 
     SB.createPlatform('samsung', {
@@ -4286,6 +4481,8 @@ SB.readyForPlatform('samsung', function () {
         setKeys: function () {
 
           this.keys = sf.key;
+
+          this.keys['RW'] = 69;
 
           document.body.onkeydown = function ( event ) {
             var keyCode = event.keyCode;

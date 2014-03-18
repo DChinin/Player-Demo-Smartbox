@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <widget>
-	<mouse>y</mouse>
+	<mouse itemtype="string">y</mouse>
 	<previewjs itemtype="string"></previewjs>
 	<preicon itemtype="string"></preicon>
 	<cpname itemtype="string"></cpname>
@@ -25,11 +25,6 @@
 		<link itemtype="string">https://github.com/DenisChinin/Player-Demo-Smartbox</link>
 		<organization itemtype="string">Smart</organization>
 	</author>
-
-    <ThumbIcon itemtype="string">icon/sb_demo_115x95.png</ThumbIcon>
-    <BigThumbIcon itemtype="string">icon/sb_demo_115x95.png</BigThumbIcon>
-    <BigListIcon itemtype="string">icon/sb_demo_95x78.png</BigListIcon>
-    <ListIcon itemtype="string">icon/sb_demo_85x70.png</ListIcon>
-
+	<BigListIcon itemtype="string">icon/sb_demo_95x78.png</BigListIcon>
+	<ListIcon itemtype="string">icon/sb_demo_85x70.png</ListIcon>
 </widget>
-
