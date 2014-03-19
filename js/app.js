@@ -2,6 +2,7 @@
 
   var LocalPlayer = {
     hasMedia: false,
+    isSeeking: false,
     initialize: function () {
       this.$el = $('.player');
       this.$overlay = $('.player-overlay');
@@ -42,15 +43,28 @@
       plugin.on('pause', function () {
         self.$play.show();
         self.$pause.hide();
+        if (self.$pause.hasClass('focus')){
+          $$nav.current(self.$play);
+        }
       });
       plugin.on('resume', function () {
         self.$play.hide();
         self.$pause.show();
+        if (self.$play.hasClass('focus')){
+          $$nav.current(self.$pause);
+        }
       });
       plugin.on('update', _.bind(this.onUpdate, this));
       plugin.on('stop', _.bind(this.onStop, this));
       plugin.on('complete', _.bind(this.onStop, this));
       plugin.on('ready', _.bind(this.onReady, this));
+      plugin.on('seekStart', function () {
+        self.isSeeking = true;
+      });
+      plugin.on('seekStop', function () {
+        self.isSeeking = false;
+      });
+      plugin.on('seekProgress', _.bind(this.onSeekProgress, this));
     },
 
     onReady: function () {
@@ -67,17 +81,31 @@
       this.$pause.hide();
       this.$overlay.show();
       this.hasMedia = false;
+      if (this.$pause.hasClass('focus')){
+        $$nav.current(this.$play);
+      }
     },
 
     onUpdate: function (  ) {
       var info = this.plugin.videoInfo,
         progressWidth;
 
-      if (this.isHLS) {
+      if (this.isHLS || this.isSeeking) {
         return;
       }
 
       progressWidth = (info.currentTime / info.duration) * 100;
+      if (progressWidth > 100) {
+        progressWidth = 100;
+      }
+      this.$progressStyle.width = progressWidth + '%';
+    },
+
+    onSeekProgress: function (  ) {
+      var info = this.plugin.videoInfo,
+        progressWidth;
+
+      progressWidth = (info.seekTime / info.duration) * 100;
       if (progressWidth > 100) {
         progressWidth = 100;
       }
@@ -90,28 +118,37 @@
         stopFunc = _.bind(this.onStopClick, this),
         RWFunc = _.bind(this.onRWClick, this),
         FFFunc = _.bind(this.onFFClick, this),
-        jumpInterval;
+        self = this;
 
       this.$pause.on('click', pauseFunc);
       this.$play.on('click', playFunc);
       this.$el.find('.player-rw').on({
         'mousedown': function (e) {
-          jumpInterval = setInterval(function () {
+          self.seekIntrvl && clearInterval(self.seekIntrvl);
+          self.seekIntrvl = setInterval(function () {
             RWFunc();
-          }, 200);
+          }, 50);
         },
         'mouseup': function () {
-          clearInterval(jumpInterval);
+          clearInterval(self.seekIntrvl);
+        },
+        'nav_key:enter': function () {
+          self.onRWClick();
         }
       });
       this.$el.find('.player-ff').on({
         'mousedown': function (e) {
-          jumpInterval = setInterval(function () {
+          console.log('111');
+          self.seekIntrvl && clearInterval(self.seekIntrvl);
+          self.seekIntrvl = setInterval(function () {
             FFFunc();
-          }, 200);
+          }, 50);
         },
         'mouseup': function () {
-          clearInterval(jumpInterval);
+          clearInterval(self.seekIntrvl);
+        },
+        'nav_key:enter': function () {
+          self.onFFClick();
         }
       });
       this.$seek.on('click', _.bind(this.onSeekClick, this));
@@ -156,13 +193,15 @@
     },
 
     onRWClick: function () {
-      console.log('on rw click');
-      this.plugin.backward();
+      if ( !this.isHLS ) {
+        this.plugin.backward();
+      }
     },
 
     onFFClick: function () {
-      console.log('on ff click');
-      this.plugin.forward();
+      if (!this.isHLS) {
+        this.plugin.forward();
+      }
     }
   };
 

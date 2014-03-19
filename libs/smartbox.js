@@ -2207,11 +2207,13 @@ $(function () {
     var errorTimeout;
 
     var Player = window.Player = {
-
-
+        isSeeking: false,
+        // default seek time in seconds
+        jumpLength: 5,
         config: {
             //Время после которого произойдет событие 'error'
             errorTimeout: 9000,
+          useSeekDebounce: true,
             size: {
               left: 0,
               top: 0,
@@ -2219,9 +2221,6 @@ $(function () {
               height: 720
             }
         },
-
-        jumpLength: 5,
-
         /**
          * Inserts player object to DOM and do some init work
          * @examples
@@ -2348,12 +2347,13 @@ $(function () {
         resume: function () {
           if (this.state === 'pause') {
             this._resume();
-            stub_play(this);
             this.state = "play";
             this.trigger('resume');
           }
         },
-        _resume: $.noop,
+        _resume: function () {
+          stub_play(this);
+        },
         /**
          * Toggles pause/resume
          * @examples
@@ -2424,7 +2424,8 @@ $(function () {
             /**
              * Current playback time in seconds
              */
-            currentTime: 0
+            currentTime: 0,
+            seekTime: null
         },
 
         /**
@@ -2433,7 +2434,7 @@ $(function () {
          * @examples
          * Player.seek(20); // seek to 20 seconds
          */
-        seek: function (seconds) {
+        $seek: function (seconds) {
             var self = this;
             self.videoInfo.currentTime = seconds;
             self.pause();
@@ -2444,29 +2445,83 @@ $(function () {
             }, 500);
         },
 
+        seek: function ( time, useDebounce ) {
+          var info = this.videoInfo,
+            jump;
+          if ( time <= 0 ) {
+            time = 0;
+          }
+          if ( time >= info.duration ) {
+            time = info.duration;
+            info.currentTime = time;
+            var state = this.state;
+            this.state = 'STOP';
+            if ( state != 'STOP' ) {
+              this.stop();
+              this.trigger('complete');
+            }
+            if (info.seekTime) {
+              info.seekTime = null;
+              this.trigger('seekStop')
+            }
+          } else {
+            if ( this.config.useSeekDebounce && useDebounce) {
+              this.seekDebounce(time);
+            } else {
+              this.seekStop(time);
+            }
+            if (info.seekTime) {
+              this.trigger('seekProgress')
+            }
+          }
+        },
+
+        seekStop: function ( time ) {
+          var info = this.videoInfo;
+          if (this.state !== 'stop') {
+            this._seek(time);
+            info.currentTime = time;
+            if (info.seekTime) {
+              info.seekTime = null;
+              this.trigger('seekStop');
+            }
+            this.trigger('update');
+          }
+        },
+
+        seekDebounce: _.debounce(function (time) {
+          this.seekStop(time)
+        }, 500),
+
         forward: function ( time ) {
           time = time || this.jumpLength;
-          this._forward(time);
-          this.videoInfo.currentTime += time;
-          if (this.videoInfo.currentTime > this.duration) {
-            this.videoInfo.currentTime = this.duration;
+          if (this.state !== 'stop') {
+            var seekTime = this.setSeekTime(time);
+            this.seek(seekTime, true);
           }
-          this.trigger('update');
         },
-
-        _forward: $.noop,
-
         backward: function (time) {
           time = time || this.jumpLength;
-          this._backward(time);
-          this.videoInfo.currentTime -= time;
-          if (this.videoInfo.currentTime < 0) {
-            this.videoInfo.currentTime = 0;
+          if (this.state !== 'stop') {
+            var seekTime = this.setSeekTime(-time);
+            this.seek(seekTime, true);
           }
-          this.trigger('update');
+
+        },
+        setSeekTime: function (time) {
+          var info = this.videoInfo;
+
+          // check for null value
+          if ( _.isNull(info.seekTime) ) {
+            info.seekTime = info.currentTime;
+            this.trigger('seekStart');
+          }
+
+          info.seekTime += time;
+
+          return info.seekTime;
         },
 
-        _backward: $.noop,
         /**
          * For multi audio tracks videos
          */
@@ -3168,7 +3223,7 @@ SB.readyForPlatform('browser', function () {
         _resume: function () {
             this.$video_container[0].play();
         },
-        seek: function (time) {
+        _seek: function (time) {
             this.$video_container[0].currentTime = time;
         },
         _forward: function (time) {
@@ -3470,7 +3525,7 @@ SB.readyForPlatform('lg', function () {
         _stop: function () {
             this.plugin.stop();
         },
-        seek: function(time){
+        _seek: function(time){
             this.plugin.seek(time*1000);
         },
         audio: {
@@ -3897,7 +3952,7 @@ SB.readyForPlatform('philips', function () {
             video.play(1);
             startUpdate();
         },
-        seek: function (time) {
+        _seek: function (time) {
             //-10 for test pass
             video.seek((time - 10) * 1000);
         }
@@ -4053,61 +4108,52 @@ SB.readyForPlatform('samsung', function () {
           height: 720
         },
         _init: function () {
-            var self = this;
+            var style,
+              wrap;
             //document.body.onload=function(){
-            if (self.usePlayerObject) {
-                //self.$plugin = $('<object id="pluginPlayer" border=0 classid="clsid:SAMSUNG-INFOLINK-PLAYER" style="position: absolute; left: 0; top: 0; width: 1280px; height: 720px;"></object>');
-                self.plugin = document.getElementById('pluginPlayer');
-                //var wrap = document.createElement('div');
-                //wrap.className = 'player-wrap';
-                //wrap.appendChild(self.plugin);
-                document.body.appendChild(self.plugin);
+            if (this.usePlayerObject) {
+                this.plugin = document.getElementById('pluginPlayer');
+                style = this.plugin.style;
+                style.position = 'absolute';
+                style.left = '0px';
+                style.top = '0px';
+                wrap = document.createElement('div');
+                wrap.className = 'player-wrap';
+                wrap.appendChild(this.plugin);
+                document.body.appendChild(wrap);
             } else {
-                self.plugin = sf.core.sefplugin('Player');
+                this.plugin = sf.core.sefplugin('Player');
             }
 
-
-            if (!self.plugin) {
+            if (!this.plugin) {
                 throw new Error('failed to set plugin');
             }
 
-            self.plugin.OnStreamInfoReady = 'Player.OnStreamInfoReady';
-            self.plugin.OnRenderingComplete = 'Player.OnRenderingComplete';
-            self.plugin.OnCurrentPlayTime = 'Player.OnCurrentPlayTime';
-            self.plugin.OnCurrentPlaybackTime = 'Player.OnCurrentPlayTime';
-            self.plugin.OnBufferingStart = 'Player.OnBufferingStart';
-            //self.plugin.OnBufferingProgress = 'Player.OnBufferingProgress';
-            self.plugin.OnBufferingComplete = 'Player.OnBufferingComplete';
-            self.plugin.OnConnectionFailed = 'Player.onError';
-            self.plugin.OnNetworkDisconnected = 'Player.onError';
-            //self.plugin.OnAuthenticationFailed = 'Player.OnAuthenticationFailed';
+            this.plugin.OnStreamInfoReady = 'Player.OnStreamInfoReady';
+            this.plugin.OnRenderingComplete = 'Player.OnRenderingComplete';
+            this.plugin.OnCurrentPlayTime = 'Player.OnCurrentPlayTime';
+            this.plugin.OnCurrentPlaybackTime = 'Player.OnCurrentPlayTime';
+            this.plugin.OnBufferingStart = 'Player.OnBufferingStart';
+            //this.plugin.OnBufferingProgress = 'Player.OnBufferingProgress';
+            this.plugin.OnBufferingComplete = 'Player.OnBufferingComplete';
+            this.plugin.OnConnectionFailed = 'Player.onError';
+            this.plugin.OnNetworkDisconnected = 'Player.onError';
+            //this.plugin.OnAuthenticationFailed = 'Player.OnAuthenticationFailed';
 
-            self.plugin.OnEvent = 'Player.onEvent';
+            this.plugin.OnEvent = 'Player.onEvent';
             //}
 
         },
-        seek: function (time) {
-            if (time <= 0) {
-                time = 0;
-            }
-            if (this.videoInfo.duration <= (time + 1)) {
-              time = this.duration;
-              this.videoInfo.currentTime = this.duration;
-              var state = this.state;
-              this.state = 'STOP';
-              if (state != 'STOP') {
-                this.trigger('complete');
-              }
+        _seek: function (time) {
+            var jump = Math.floor(time - this.videoInfo.currentTime) + 1;
+
+          alert('SEEK TIME ' + time);
+          alert('jump time ' + jump);
+            if (jump < 0) {
+              this.doPlugin('JumpBackward', -jump);
             }
             else {
-              var jump = Math.floor(time - this.currentTime) + 1;
-              if (jump < 0) {
-                this.doPlugin('JumpBackward', -jump);
-              }
-              else {
-                this.doPlugin('JumpForward', jump);
-              }
-              this.videoInfo.currentTime = time;
+              this.doPlugin('JumpForward', jump);
             }
         },
 
@@ -4155,7 +4201,9 @@ SB.readyForPlatform('samsung', function () {
             Player.trigger('complete');
         },
         OnStreamInfoReady: function () {
-            var duration, width, height, resolution;
+            var duration, width, height, resolution,
+              playerSize = this.config.size,
+              style;
 
             try {
                 duration = this.doPlugin('GetDuration');
@@ -4169,6 +4217,11 @@ SB.readyForPlatform('samsung', function () {
             if (this.usePlayerObject) {
                 width = this.doPlugin('GetVideoWidth');
                 height = this.doPlugin('GetVideoHeight');
+                style = this.plugin.style;
+                style.left = playerSize.left + 'px';
+                style.top = playerSize.top + 'px';
+                style.width = playerSize.width + 'px';
+                style.height = playerSize.height + 'px';
             } else {
                 resolution = this.doPlugin('GetVideoResolution');
                 if (resolution == -1) {
@@ -4184,6 +4237,7 @@ SB.readyForPlatform('samsung', function () {
             this.videoInfo.duration = duration;
             this.videoInfo.width = width * 1;
             this.videoInfo.height = height * 1;
+            this._setSize(this.config.size);
             this.trigger('ready');
         },
         OnBufferingStart: function () {
@@ -4237,38 +4291,21 @@ SB.readyForPlatform('samsung', function () {
             return result;
         },
         _setSize: function (size) {
-
-          this.isFullscreen = false;
-
           var width = size.width,
             height = size.height,
             x = size.left,
             y = size.top,
             videoWidth = this.videoInfo.width,
-            videoHeight = this.videoInfo.height;
+            videoHeight = this.videoInfo.height,
+            windowRate, clipRate, w, h;
 
           // check if no video sizes
           if (!videoWidth || !videoHeight) {
-
-            // event for overlay
-            this.trigger('setSize', {
-              width: width,
-              height: height,
-              offsetX: x,
-              offsetY: y
-            });
             return;
           }
 
-          var fullscreenSize = this.fullscreenSize,
-            windowRate = width / height,
-            clipRate = videoWidth / videoHeight,
-            w, h;
-
-          if (width === fullscreenSize.width &&
-              height === fullscreenSize.height) {
-            this.isFullscreen = true;
-          }
+          windowRate = width / height;
+          clipRate = videoWidth / videoHeight;
 
           if (windowRate > clipRate) {
               w = height * clipRate;
@@ -4281,28 +4318,19 @@ SB.readyForPlatform('samsung', function () {
               y += (height - h) / 2;
           }
 
-/*          if (!this.isFullscreen) {
-            this.doPlugin('SetCropArea', 0, 0, videoWidth, videoHeight);
-            $$log('Reset crop area', 'player');
-          }*/
+          //Player DPI is not the same as window DPI
+          x = Math.floor(x * 0.75);
+          y = Math.floor(y * 0.75);
+          w = Math.floor(w * 0.75);
+          h = Math.floor(h * 0.75);
+          this.doPlugin('SetDisplayArea', x, y, w, h);
 
-          //В плеере DPI отличное от приложения
-          this.doPlugin('SetDisplayArea', x * 0.75, y * 0.75, w * 0.75, h * 0.75);
-
-          // хак для паузы после изменения размера
-          // самсунговский плеер автоматически воспроизводит видео после изменения размеров
+          // hack for pause
+          // samsung player starts player after setDisplayArea
           if (this.state === 'PAUSE') {
             this.pause(true);
           }
 
-          this.trigger('setSize', {
-            width: width,
-            height: height,
-            offsetX: size.left,
-            offsetY: size.top
-          });
-
-          $$log('Set player size', 'player');
           $$log('Player size: ' + Math.floor(w) + " * " + Math.floor(h) + " ### Position: top:" + y + " / left: " + x, 'player');
         },
         audio: {
@@ -4364,8 +4392,8 @@ SB.readyForPlatform('samsung', function () {
             pluginObjectTV: 'SAMSUNG-INFOLINK-TV',
             pluginObjectTVMW: 'SAMSUNG-INFOLINK-TVMW',
             pluginObjectNetwork: 'SAMSUNG-INFOLINK-NETWORK',
-            pluginObjectNNavi: 'SAMSUNG-INFOLINK-NNAVI'
-            //pluginPlayer: 'SAMSUNG-INFOLINK-PLAYER'
+            pluginObjectNNavi: 'SAMSUNG-INFOLINK-NNAVI',
+            pluginPlayer: 'SAMSUNG-INFOLINK-PLAYER'
         },
         samsungFiles = [
             '$MANAGER_WIDGET/Common/af/../webapi/1.0/deviceapis.js',
